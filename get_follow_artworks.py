@@ -44,6 +44,8 @@ def restart_if_failed(func, max_tries, args=(), kwargs={}, secs=120, sleep=5):
 def read_cookie():
 	'''
 	读取cookies
+	之所以将获取和读取cookies分开写
+	主要是节省时间，一次获取保存以后直接读取即可
 	'''
 	jar = RequestsCookieJar()
 	with open('pixiv_cookies.txt', 'r') as fp:
@@ -53,23 +55,26 @@ def read_cookie():
 	return jar
 	
 def get_artist():
+	'''
+	获取画师昵称和id，以dict形式返回
+	'''
 	L = {} # 空字典存画师信息
 	headers = {
 			'referer': 'https://accounts.pixiv.net/login',
 			'origin': 'https://accounts.pixiv.net',
 			'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
 				 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
-	res = session.get('https://www.pixiv.net/bookmark.php?type=user&rest=show', headers=headers) # 获取关注画师页面内容
+	res = session.get('https://www.pixiv.net/bookmark.php?type=user&rest=show', headers=headers) # 获取指定类型画师信息
 	res_bs = BeautifulSoup(res.text, 'html.parser') # 构造bs对象
-	if res_bs.find('div', attrs={'class', '_pager-complex'}) != None:
-		max_page = res_bs.find('div', attrs={'class', '_pager-complex'}).find_all('li')[-2].text # 获取最大页码数，最大页码是在倒数第二的li里
+	if res_bs.find('div', attrs={'class': '_pager-complex'}) != None:
+		max_page = res_bs.find('div', attrs={'class': '_pager-complex'}).find_all('li')[-2].text # 获取最大页码数，最大页码是在倒数第二的li里
 	else:
 		max_page = 1
 	for i in range(1, int(max_page) + 1): # 获取画师信息
-		url = f'https://www.pixiv.net/bookmark.php?type=user&rest=show&p={i}'
+		url = f'https://www.pixiv.net/bookmark.php?type=user&rest=show&p={i}' # 获取
 		res = session.get(url, headers=headers)
 		res_bs = BeautifulSoup(res.text, 'html.parser') # 构造bs对象
-		artist_list = res_bs.find('section', id='search-result').find_all('div', attrs={'class', 'userdata'})
+		artist_list = res_bs.find('section', id='search-result').find_all('div', attrs={'class': 'userdata'})
 		for item in artist_list:
 			L[item.a['data-user_name']] = item.a['data-user_id']
 	print('已获取所有画师信息')
@@ -146,21 +151,22 @@ def download_picture(ajax_list, artist_dict):
 			res_dict = json.loads(res.text) # 反序列化为dict
 			work_list = res_dict['body']['works'].values() # 获取作品信息，得到list,其中每个元素是一个dict
 			for d in work_list:
-				time.sleep(randint(5,10)) # 暂停一下避免速度过快被封禁
-				# 获取作品tile和缩略图url
+				# 获取作品tile和缩略图url和页数
 				title = d['title']
 				pic_url = d['url']
 				pic_id = d['illustId']
+				page_count = d['pageCount']
 				pic_url = pic_url.replace('c/250x250_80_a2/', '').replace('square1200', 'master1200')
 				try:
-					download_pic(title, pic_id, pic_url, artist_name) # 调用下载函数
+					download_pic(title, pic_id, pic_url, artist_name, page_count) # 调用下载函数
 				except:
-					restart_if_failed(download_pic, 20, (title, pic_id, pic_url, artist_name)) # 下载失败的时候重试
+					restart_if_failed(download_pic, 20, (title, pic_id, pic_url, artist_name, page_count)) # 下载失败的时候重试
 		name_count += 1
 		artist_id_count += 1
-	print(artist_name, '完成')
+		print(artist_name, '完成')
+	print('已完成所有任务')
 
-def download_pic(title, pic_id, pic_url, artist_name):
+def download_pic(title, pic_id, pic_url, artist_name, page_count):
 	'''
 	下载图片
 	'''
@@ -173,13 +179,28 @@ def download_pic(title, pic_id, pic_url, artist_name):
 		'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
 			 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
 	title = title.translate(TRAN_TABLE)
-	print('当前图片url: ', pic_url)
-	r = session.get(pic_url, headers=headers) # 获取图片
-	# 递归检查图片是否已经存在
-	while os.path.isfile(f'{artist_name}/' + title + '.jpg'):
-		title = title + '-1'
-	with open(f'{artist_name}/' + title + '.jpg', 'wb') as fp:
-		fp.write(r.content)
+	if page_count == 1:
+		time.sleep(randint(5,10)) # 暂停一下避免速度过快被封禁
+		print('当前图片url: ', pic_url)
+		r = session.get(pic_url, headers=headers) # 获取图片
+		# 递归检查图片是否已经存在
+		while os.path.isfile(f'{artist_name}/' + title + '.jpg'):
+			title = title + '-1'
+		with open(f'{artist_name}/' + title + '.jpg', 'wb') as fp:
+			fp.write(r.content)
+	else:
+		for i in range(page_count):
+			time.sleep(randint(5, 10)) # 暂停避免爬太快被封
+			target_title = title + str(i)
+			while os.path.isfile('pixiv_fav/' + target_title + '.jpg'):
+				target_title += '-1'
+			target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
+			print('当前图片url: ', target_url)
+			r = session.get(target_url, headers=headers)
+			with open(f'{artist_name}/' + target_title + '.jpg', 'wb') as fp:
+				fp.write(r.content)
+
+	
 
 if __name__ == '__main__':
 	proxy = {
@@ -195,12 +216,4 @@ if __name__ == '__main__':
 	ajax_list = get_ajax_url(artist_dict)
 	# for i in ajax_list:
 		# print(i)
-	download_picture(ajax_list, artist_dict) 
-	
-	
-
-    
-
-
-
-
+	download_picture(ajax_list, artist_dict)
