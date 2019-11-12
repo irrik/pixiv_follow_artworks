@@ -57,7 +57,7 @@ def read_cookie():
 			jar.set(cookie['name'], cookie['value'])
 	return jar
 	
-def get_artist_information():
+def get_artist_information(artist_rest):
 	'''
 	返回一个三个list，分别是画师的昵称和id，还有包含作者所有作品信息的url
 	'''
@@ -69,14 +69,14 @@ def get_artist_information():
 			'origin': 'https://accounts.pixiv.net',
 			'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
 				 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
-	res = session.get('https://www.pixiv.net/bookmark.php?type=user&rest=hide', headers=headers) # 获取指定类型画师信息
+	res = session.get(f'https://www.pixiv.net/bookmark.php?type=user&rest={artist_rest}', headers=headers) # 获取指定类型画师信息
 	res_bs = BeautifulSoup(res.text, 'html.parser') 
 	if res_bs.find('div', attrs={'class': '_pager-complex'}) != None:
 		max_page = int(res_bs.find('div', attrs={'class': '_pager-complex'}).find_all('li')[-2].text) # 获取最大页码数，最大页码是在倒数第二的li里
 	else:
 		max_page = 1
 	for i in range(1, max_page + 1): # 获取画师信息
-		url = f'https://www.pixiv.net/bookmark.php?type=user&rest=hide&p={i}' 
+		url = f'https://www.pixiv.net/bookmark.php?type=user&rest={artist_rest}&p={i}' 
 		res = session.get(url, headers=headers)
 		res_bs = BeautifulSoup(res.text, 'html.parser') # 构造bs对象
 		artist_list = res_bs.find('section', id='search-result').find_all('div', attrs={'class': 'userdata'})
@@ -149,7 +149,7 @@ def download_picture():
 	'''
 	解析数据传给下载函数下载
 	'''
-	artist_name_list, artist_id_list, ajax_url_list = get_artist_information()
+	artist_name_list, artist_id_list, ajax_url_list = get_artist_information(artist_rest)
 	name_count = 0
 	artist_id_count = 0
 	
@@ -245,6 +245,8 @@ def get_gif(artist_name, title, pic_id, referer_url):
 	# 合成gif图片
 	for file_name in file_name_list:
 		frame_list.append(imageio.imread(file_name))
+	while os.path.isfile('pixiv_fav/' + title + '.gif'):
+		title += '-1'
 	imageio.mimsave(f'{artist_name}/' + title + '.gif', frame_list, 'GIF', duration=delay / 1000)
 
 	for file_name in file_name_list:
@@ -265,4 +267,6 @@ if __name__ == '__main__':
 	session.cookies = cookies
 	# for i in ajax_list:
 		# print(i)
+	choose_num = int(input('输入1抓取公开的画师，输入2抓取隐藏画师：'))
+	artist_rest = 'show' if choose_num == 1 else 'hide'
 	download_picture()
