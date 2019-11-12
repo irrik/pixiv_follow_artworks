@@ -7,6 +7,8 @@ from bs4 import BeautifulSoup
 from pprint import pprint
 import time
 from random import randint
+import imageio
+import zipfile
 
 TRAN_TABLE = str.maketrans('', '', r'/\*:?|<>"') # 替换非法字符的表
 
@@ -31,7 +33,7 @@ def restart_if_failed(func, max_tries, args=(), kwargs={}, secs=120, sleep=5):
 	while True:
 		dq.append(time.time())
 		try:
-			func(*args, **kwargs)
+			res = func(*args, **kwargs)
 		except:
 			traceback.print_exc()
 			if len(dq) == max_tries and time.time() - dq[0] < secs:
@@ -40,6 +42,7 @@ def restart_if_failed(func, max_tries, args=(), kwargs={}, secs=120, sleep=5):
 				time.sleep(sleep)
 		else: # 不出错的时候执行这个else语句
 			break
+	return res
 
 def read_cookie():
 	'''
@@ -66,14 +69,14 @@ def get_artist_information():
 			'origin': 'https://accounts.pixiv.net',
 			'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
 				 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
-	res = session.get('https://www.pixiv.net/bookmark.php?type=user&rest=show', headers=headers) # 获取指定类型画师信息
+	res = session.get('https://www.pixiv.net/bookmark.php?type=user&rest=hide', headers=headers) # 获取指定类型画师信息
 	res_bs = BeautifulSoup(res.text, 'html.parser') 
 	if res_bs.find('div', attrs={'class': '_pager-complex'}) != None:
 		max_page = int(res_bs.find('div', attrs={'class': '_pager-complex'}).find_all('li')[-2].text) # 获取最大页码数，最大页码是在倒数第二的li里
 	else:
 		max_page = 1
 	for i in range(1, max_page + 1): # 获取画师信息
-		url = f'https://www.pixiv.net/bookmark.php?type=user&rest=show&p={i}' 
+		url = f'https://www.pixiv.net/bookmark.php?type=user&rest=hide&p={i}' 
 		res = session.get(url, headers=headers)
 		res_bs = BeautifulSoup(res.text, 'html.parser') # 构造bs对象
 		artist_list = res_bs.find('section', id='search-result').find_all('div', attrs={'class': 'userdata'})
@@ -85,7 +88,7 @@ def get_artist_information():
 
 	print('已获取所有画师信息')
 	return artist_name_list, artist_id_list, ajax_url_list
-	
+
 def get_id_group_list(ajax_url, artist_id):
 	'''
 	获取画师所有作品的id，从大到小排序并分组后返回一个嵌套的list。形如[[],[]]
@@ -98,10 +101,11 @@ def get_id_group_list(ajax_url, artist_id):
 				'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
 	try:
 		ajax_html = get_url(ajax_url, headers=headers) # 获取作品url,返回作家所有作品相关信息的json。其中有价值的信息是作品id
+		temp_id_dict = json.loads(ajax_html.text)
 	except:
-		restart_if_failed(get_url, 20, (ajax_url, headers))
+		ajax_html = restart_if_failed(get_url, 20, (ajax_url, headers))
+		temp_id_dict = json.loads(ajax_html.text)
 	print('拿到画家作品数据')
-	temp_id_dict = json.loads(ajax_html.text)
 	illusts_dict = temp_id_dict['body']['illusts']
 	manga_dict = temp_id_dict['body']['manga']
 	# 判断作者是否有漫画作品,有就合并到一块，没有就用illusts_dict
@@ -134,9 +138,10 @@ def get_work_list(id_group, artist_id, page_count):
 	print(work_url)
 	try:
 		res = get_url(work_url)
+		res_dict = json.loads(res.text) # 反序列化为dict
 	except:
-		restart_if_failed(get_url, 20, (work_url,)) # 单个元素要传元组应该加上,
-	res_dict = json.loads(res.text) # 反序列化为dict
+		res = restart_if_failed(get_url, 20, (work_url,)) # 单个元素要传元组应该加上,
+		res_dict = json.loads(res.text) # 反序列化为dict
 	work_list = res_dict['body']['works'].values() # 获取作品信息，得到list,其中每个元素是一个dict
 	return work_list
 
@@ -160,53 +165,92 @@ def download_picture():
 			page_count += 1
 			for work in work_list:
 				# 获取作品tile和缩略图url和页数
+				#illustType表示图片的类型。0是一张图。1是多图，2是动图
 				title = work['title']
 				pic_url = work['url']
 				pic_id = work['illustId']
 				pic_num = work['pageCount']
+				pic_illustType = work['illustType']
 				pic_url = pic_url.replace('c/250x250_80_a2/', '').replace('square1200', 'master1200')
 				try:
-					download_pic(title, pic_id, pic_url, artist_name, pic_num) # 调用下载函数
+					download_pic(title, pic_id, pic_url, artist_name, pic_num, pic_illustType) # 调用下载函数
 				except:
-					restart_if_failed(download_pic, 20, (title, pic_id, pic_url, artist_name, pic_num)) # 下载失败的时候重试
+					restart_if_failed(download_pic, 20, (title, pic_id, pic_url, artist_name, pic_num, pic_illustType)) # 下载失败的时候重试
 		name_count += 1
 		artist_id_count += 1
 		print(artist_name, '完成')
 	print('已完成所有任务')
 
-def download_pic(title, pic_id, pic_url, artist_name, pic_num):
+def download_pic(title, pic_id, pic_url, artist_name, pic_num, pic_illustType):
 	'''
 	下载图片
 	'''
 	os.makedirs(artist_name, exist_ok=True) # 创建画师名字的文件夹
-
 	referer_url = 'https://www.pixiv.net/artworks/' + str(pic_id)
-	# 构造一下header头
-	headers = {
-		'referer': referer_url,
-		'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
-			 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
 	title = title.translate(TRAN_TABLE)
-	if pic_num == 1:
-		time.sleep(randint(5,10)) # 暂停一下避免速度过快被封禁
-		print('当前图片url: ', pic_url)
-		r = session.get(pic_url, headers=headers) # 获取图片
-		# 递归检查图片是否已经存在
-		while os.path.isfile(f'{artist_name}/' + title + '.jpg'):
-			title = title + '-1'
-		with open(f'{artist_name}/' + title + '.jpg', 'wb') as fp:
-			fp.write(r.content)
-	else:
-		for i in range(pic_num):
-			time.sleep(randint(5, 10)) # 暂停避免爬太快被封
-			target_title = title + str(i)
-			while os.path.isfile('pixiv_fav/' + target_title + '.jpg'):
-				target_title += '-1'
-			target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
-			print('当前图片url: ', target_url)
-			r = session.get(target_url, headers=headers)
-			with open(f'{artist_name}/' + target_title + '.jpg', 'wb') as fp:
+	if pic_illustType != 2:
+		# 构造一下header头
+		headers = {
+			'referer': referer_url,
+			'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
+				'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
+		
+		if pic_num == 1:
+			time.sleep(randint(5,10)) # 暂停一下避免速度过快被封禁
+			print('当前图片url: ', pic_url)
+			r = session.get(pic_url, headers=headers) # 获取图片
+			# 递归检查图片是否已经存在
+			while os.path.isfile(f'{artist_name}/' + title + '.jpg'):
+				title = title + '-1'
+			with open(f'{artist_name}/' + title + '.jpg', 'wb') as fp:
 				fp.write(r.content)
+		else:
+			for i in range(pic_num):
+				time.sleep(randint(5, 10)) # 暂停避免爬太快被封
+				target_title = title + str(i)
+				while os.path.isfile('pixiv_fav/' + target_title + '.jpg'):
+					target_title += '-1'
+				target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
+				print('当前图片url: ', target_url)
+				r = session.get(target_url, headers=headers)
+				with open(f'{artist_name}/' + target_title + '.jpg', 'wb') as fp:
+					fp.write(r.content)
+	else:
+		get_gif(artist_name, title, pic_id, referer_url)
+
+def get_gif(artist_name, title, pic_id, referer_url):
+	'''
+	处理动图的情况，下载图片压缩包，在本地合成动图
+	'''
+	file_name_list = []
+	frame_list = []
+
+	url = f'https://www.pixiv.net/ajax/illust/{pic_id}/ugoira_meta'
+	headers = {
+			'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
+				'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
+	res = session.get(url, headers=headers)
+	res_obj = json.loads(res.text)
+	delay = res_obj['body']['frames'][0]['delay']
+	originalSrc = res_obj['body']['originalSrc']
+	headers['referer'] = referer_url
+	res = session.get(originalSrc, headers=headers) # 请求原图的压缩包，返回的是静态图的zip文件，需要自己处理合成为gif
+	with open('temp.zip', 'wb') as fp:
+		fp.write(res.content)
+	zip_obj = zipfile.ZipFile('temp.zip', 'r')
+	for file_name in zip_obj.namelist():
+		file_name_list.append(file_name)
+		zip_obj.extract(file_name)
+	zip_obj.close() # 关闭zip文件
+	# 合成gif图片
+	for file_name in file_name_list:
+		frame_list.append(imageio.imread(file_name))
+	imageio.mimsave(f'{artist_name}/' + title + '.gif', frame_list, 'GIF', duration=delay / 1000)
+
+	for file_name in file_name_list:
+		os.remove(file_name)
+	os.remove('temp.zip')
+
 
 	
 
