@@ -208,7 +208,7 @@ def download_pic(title, pic_id, pic_url, artist_name, pic_num, pic_illustType):
 			for i in range(pic_num):
 				time.sleep(randint(5, 10)) # 暂停避免爬太快被封
 				target_title = title + str(i)
-				while os.path.isfile('pixiv_fav/' + target_title + '.jpg'):
+				while os.path.isfile(f'{artist_name}/' + target_title + '.jpg'):
 					target_title += '-1'
 				target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
 				print('当前图片url: ', target_url)
@@ -216,6 +216,7 @@ def download_pic(title, pic_id, pic_url, artist_name, pic_num, pic_illustType):
 				with open(f'{artist_name}/' + target_title + '.jpg', 'wb') as fp:
 					fp.write(r.content)
 	else:
+		time.sleep(randint(5, 10)) # 暂停避免爬太快被封
 		get_gif(artist_name, title, pic_id, referer_url)
 
 def get_gif(artist_name, title, pic_id, referer_url):
@@ -224,7 +225,7 @@ def get_gif(artist_name, title, pic_id, referer_url):
 	'''
 	file_name_list = []
 	frame_list = []
-
+	print('正在处理动图')
 	url = f'https://www.pixiv.net/ajax/illust/{pic_id}/ugoira_meta'
 	headers = {
 			'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
@@ -245,7 +246,7 @@ def get_gif(artist_name, title, pic_id, referer_url):
 	# 合成gif图片
 	for file_name in file_name_list:
 		frame_list.append(imageio.imread(file_name))
-	while os.path.isfile('pixiv_fav/' + title + '.gif'):
+	while os.path.isfile(f'{artist_name}/' + title + '.gif'):
 		title += '-1'
 	imageio.mimsave(f'{artist_name}/' + title + '.gif', frame_list, 'GIF', duration=delay / 1000)
 
