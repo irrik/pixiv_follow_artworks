@@ -49,7 +49,7 @@ def get_page_num():
 				 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
     }
     # 请求收藏页面，进行分析
-    res = session.get('https://www.pixiv.net/bookmark.php', headers=headers)
+    res = session.get('https://www.pixiv.net/bookmark.php', headers=headers, timeout=1)
     res_bs = BeautifulSoup(res.text, 'html.parser')
     if res_bs.find('ul', attrs={'class': 'page-list'}) != None:
         page_num = int(res_bs.find('ul', attrs={'class': 'page-list'}).find_all('li')[-1].a.text)
@@ -75,7 +75,7 @@ def get_pic_information():
     pic_id_list = []
     for i in range(1, page_num + 1):
         url = f'https://www.pixiv.net/bookmark.php?rest=show&p={i}'
-        res = session.get(url, headers=headers)
+        res = session.get(url, headers=headers, timeout=1)
         res_bs = BeautifulSoup(res.text, 'html.parser')
         pic_div_list = res_bs.find('div', attrs={'class': 'display_editable_works'}).find_all('div', attrs={'class': '_layout-thumbnail'})
         pic_h1_list = res_bs.find('div', attrs={'class': 'display_editable_works'}).find_all('h1', attrs={'class': 'title'})
@@ -116,7 +116,7 @@ def download_pic(pic_url, pic_ref, pic_title, page_count, pic_type, pic_id):
                 pic_title += '-1'
             time.sleep(randint(5, 10)) # 暂停避免爬太快被封
             print('当前图片url: ', pic_url)
-            r = session.get(pic_url, headers=headers)
+            r = session.get(pic_url, headers=headers, timeout=1)
             with open('pixiv_fav/' + pic_title + '.jpg', 'wb') as fp:
                 fp.write(r.content)
         else:
@@ -127,7 +127,7 @@ def download_pic(pic_url, pic_ref, pic_title, page_count, pic_type, pic_id):
                     target_title += '-1'
                 target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
                 print('当前图片url: ', target_url)
-                r = session.get(target_url, headers=headers)
+                r = session.get(target_url, headers=headers, timeout=1)
                 with open('pixiv_fav/' + target_title + '.jpg', 'wb') as fp:
                     fp.write(r.content)
     else:
@@ -147,12 +147,12 @@ def get_gif(pic_id, pic_ref, pic_title):
     headers = {
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
                 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
-    res = session.get(url, headers=headers)
+    res = session.get(url, headers=headers, timeout=1)
     res_obj = json.loads(res.text)
     delay = res_obj['body']['frames'][0]['delay']
     originalSrc = res_obj['body']['originalSrc']
     headers['referer'] = pic_ref
-    res = session.get(originalSrc, headers=headers) # 请求原图的压缩包，返回的是静态图的zip文件，需要自己处理合成为gif
+    res = session.get(originalSrc, headers=headers, timeout=1) # 请求原图的压缩包，返回的是静态图的zip文件，需要自己处理合成为gif
     with open('temp.zip', 'wb') as fp:
         fp.write(res.content)
     zip_obj = zipfile.ZipFile('temp.zip', 'r')

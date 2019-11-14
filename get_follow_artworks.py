@@ -17,9 +17,9 @@ def get_url(url, headers=0):
 	请求一个url，返回内容。之所以用这个函数是为了配合出错后重试的函数使用。因为默认的requests最大重试次数不够用
 	'''
 	if headers != 0:
-		res = session.get(url, headers=headers)
+		res = session.get(url, headers=headers, timeout=1)
 	else:
-		res = session.get(url)
+		res = session.get(url, timeout=1)
 	return res
 
 def restart_if_failed(func, max_tries, args=(), kwargs={}, secs=120, sleep=5):
@@ -69,7 +69,7 @@ def get_artist_information(artist_rest):
 			'origin': 'https://accounts.pixiv.net',
 			'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
 				 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
-	res = session.get(f'https://www.pixiv.net/bookmark.php?type=user&rest={artist_rest}', headers=headers) # 获取指定类型画师信息
+	res = session.get(f'https://www.pixiv.net/bookmark.php?type=user&rest={artist_rest}', headers=headers, timeout=1) # 获取指定类型画师信息
 	res_bs = BeautifulSoup(res.text, 'html.parser') 
 	if res_bs.find('div', attrs={'class': '_pager-complex'}) != None:
 		max_page = int(res_bs.find('div', attrs={'class': '_pager-complex'}).find_all('li')[-2].text) # 获取最大页码数，最大页码是在倒数第二的li里
@@ -77,7 +77,7 @@ def get_artist_information(artist_rest):
 		max_page = 1
 	for i in range(1, max_page + 1): # 获取画师信息
 		url = f'https://www.pixiv.net/bookmark.php?type=user&rest={artist_rest}&p={i}' 
-		res = session.get(url, headers=headers)
+		res = session.get(url, headers=headers, timeout=1)
 		res_bs = BeautifulSoup(res.text, 'html.parser') # 构造bs对象
 		artist_list = res_bs.find('section', id='search-result').find_all('div', attrs={'class': 'userdata'})
 		for item in artist_list:
@@ -198,7 +198,7 @@ def download_pic(title, pic_id, pic_url, artist_name, pic_num, pic_illustType):
 		if pic_num == 1:
 			time.sleep(randint(5,10)) # 暂停一下避免速度过快被封禁
 			print('当前图片url: ', pic_url)
-			r = session.get(pic_url, headers=headers) # 获取图片
+			r = session.get(pic_url, headers=headers, timeout=1) # 获取图片
 			# 递归检查图片是否已经存在
 			while os.path.isfile(f'{artist_name}/' + title + '.jpg'):
 				title = title + '-1'
@@ -212,7 +212,7 @@ def download_pic(title, pic_id, pic_url, artist_name, pic_num, pic_illustType):
 					target_title += '-1'
 				target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
 				print('当前图片url: ', target_url)
-				r = session.get(target_url, headers=headers)
+				r = session.get(target_url, headers=headers, timeout=1)
 				with open(f'{artist_name}/' + target_title + '.jpg', 'wb') as fp:
 					fp.write(r.content)
 	else:
@@ -230,12 +230,12 @@ def get_gif(artist_name, title, pic_id, referer_url):
 	headers = {
 			'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
 				'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
-	res = session.get(url, headers=headers)
+	res = session.get(url, headers=headers, timeout=1)
 	res_obj = json.loads(res.text)
 	delay = res_obj['body']['frames'][0]['delay']
 	originalSrc = res_obj['body']['originalSrc']
 	headers['referer'] = referer_url
-	res = session.get(originalSrc, headers=headers) # 请求原图的压缩包，返回的是静态图的zip文件，需要自己处理合成为gif
+	res = session.get(originalSrc, headers=headers, timeout=1) # 请求原图的压缩包，返回的是静态图的zip文件，需要自己处理合成为gif
 	with open('temp.zip', 'wb') as fp:
 		fp.write(res.content)
 	zip_obj = zipfile.ZipFile('temp.zip', 'r')
