@@ -183,7 +183,7 @@ def download_picture():
 
 def download_pic(title, pic_id, pic_url, artist_name, pic_num, pic_illustType):
 	'''
-	下载图片
+	下载图片,遇到动图则调用动图处理函数，多图发生错误时则删除以前多余图片
 	'''
 	os.makedirs(artist_name, exist_ok=True) # 创建画师名字的文件夹
 	referer_url = 'https://www.pixiv.net/artworks/' + str(pic_id)
@@ -205,16 +205,23 @@ def download_pic(title, pic_id, pic_url, artist_name, pic_num, pic_illustType):
 			with open(f'{artist_name}/' + title + '.jpg', 'wb') as fp:
 				fp.write(r.content)
 		else:
-			for i in range(pic_num):
-				time.sleep(randint(5, 10)) # 暂停避免爬太快被封
-				target_title = title + str(i)
-				while os.path.isfile(f'{artist_name}/' + target_title + '.jpg'):
-					target_title += '-1'
-				target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
-				print('当前图片url: ', target_url)
-				r = session.get(target_url, headers=headers, timeout=1)
-				with open(f'{artist_name}/' + target_title + '.jpg', 'wb') as fp:
-					fp.write(r.content)
+			try: # 处理图片重复
+				pic_title_list = []	# 存储已经生成的图片名，如果报错需要根据图片名将图片逐个删除
+				for i in range(pic_num):
+					time.sleep(randint(5, 10)) # 暂停避免爬太快被封
+					target_title = title + str(i)
+					while os.path.isfile(f'{artist_name}/' + target_title + '.jpg'):
+						target_title += '-1'
+					target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
+					print('当前图片url: ', target_url)
+					r = session.get(target_url, headers=headers, timeout=1)
+					with open(f'{artist_name}/' + target_title + '.jpg', 'wb') as fp:
+						fp.write(r.content)
+					pic_title_list.append(target_title)
+			except:
+				for pic_title in pic_title_list:
+					os.remove(f'{artist_name}/' + pic_title + '.jpg')
+				raise ValueError('pic download error')
 	else:
 		time.sleep(randint(5, 10)) # 暂停避免爬太快被封
 		get_gif(artist_name, title, pic_id, referer_url)

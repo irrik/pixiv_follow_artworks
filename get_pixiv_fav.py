@@ -18,7 +18,7 @@ def restart_if_falied(func, max_tries, args=(), kwargs={}, secs=120, sleep=5):
     while True:
         dq.append(time.time())
         try:
-            func(*args, **kwargs)
+            res = func(*args, **kwargs)
         except:
             traceback.print_exc()
             if len(dq) == max_tries and time.time() - dq[0] < secs:
@@ -27,6 +27,7 @@ def restart_if_falied(func, max_tries, args=(), kwargs={}, secs=120, sleep=5):
                 time.sleep(sleep)
         else:
             break
+    return res
 
 def read_cookie():
     '''
@@ -39,7 +40,7 @@ def read_cookie():
             jar.set(cookie['name'], cookie['value'])
     return jar
 
-def get_page_num():
+def get_page_num(rest):
     '''
     请求收藏页面，返回收藏总页数
     '''
@@ -49,7 +50,7 @@ def get_page_num():
 				 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
     }
     # 请求收藏页面，进行分析
-    res = session.get('https://www.pixiv.net/bookmark.php', headers=headers, timeout=1)
+    res = session.get(f'https://www.pixiv.net/bookmark.php?rest={rest}', headers=headers, timeout=1)
     res_bs = BeautifulSoup(res.text, 'html.parser')
     if res_bs.find('ul', attrs={'class': 'page-list'}) != None:
         page_num = int(res_bs.find('ul', attrs={'class': 'page-list'}).find_all('li')[-1].a.text)
@@ -57,7 +58,7 @@ def get_page_num():
         page_num = 1
     return page_num
 
-def get_pic_information():
+def get_pic_information(page):
     '''
     获取所有收藏图片的url，构造图片的referer,图片的title, 图片的页数, 图片的类型,在一个tupe里返回6个list
     '''
@@ -66,36 +67,35 @@ def get_pic_information():
 			'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
 				 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
     }
-    page_num = get_page_num()
     pic_url_list = []
     pic_ref_list = []
     pic_title_list = []
     page_count_list = []
     pic_type_list = []
     pic_id_list = []
-    for i in range(1, page_num + 1):
-        url = f'https://www.pixiv.net/bookmark.php?rest=show&p={i}'
-        res = session.get(url, headers=headers, timeout=1)
-        res_bs = BeautifulSoup(res.text, 'html.parser')
-        pic_div_list = res_bs.find('div', attrs={'class': 'display_editable_works'}).find_all('div', attrs={'class': '_layout-thumbnail'})
-        pic_h1_list = res_bs.find('div', attrs={'class': 'display_editable_works'}).find_all('h1', attrs={'class': 'title'})
-        li_list = res_bs.find('div', attrs={'class': 'display_editable_works'}).find_all('li', attrs={'class': 'image-item'})
-        for item in li_list:
-            if item.find('div', attrs={'class': 'page-count'}) != None:
-                page_count = int(item.find('div', attrs={'class': 'page-count'}).span.text)
-            else:
-                page_count = 1
-            page_count_list.append(page_count)
-            pic_type_list.append(''.join(item.a['class'])) # 这里将class的值连在一起了。本来会被拆分，为了下面方便比较就这样写了
-        for item in pic_div_list:
-            pic_url = item.img.get('data-src').replace('c/150x150/', '')
-            pic_ref = 'https://www.pixiv.net/artworks/' + item.img.get('data-id')
-            pic_id_list.append(item.img.get('data-id'))
-            pic_url_list.append(pic_url)
-            pic_ref_list.append(pic_ref)
-        for item in pic_h1_list:
-            pic_title_list.append(item.text)
-    print('已获取所有收藏图片链接，开始下载')
+
+    url = f'https://www.pixiv.net/bookmark.php?rest={rest}&p={page}'
+    res = session.get(url, headers=headers, timeout=1)
+    res_bs = BeautifulSoup(res.text, 'html.parser')
+    pic_div_list = res_bs.find('div', attrs={'class': 'display_editable_works'}).find_all('div', attrs={'class': '_layout-thumbnail'})
+    pic_h1_list = res_bs.find('div', attrs={'class': 'display_editable_works'}).find_all('h1', attrs={'class': 'title'})
+    li_list = res_bs.find('div', attrs={'class': 'display_editable_works'}).find_all('li', attrs={'class': 'image-item'})
+    for item in li_list:
+        if item.find('div', attrs={'class': 'page-count'}) != None:
+            page_count = int(item.find('div', attrs={'class': 'page-count'}).span.text)
+        else:
+            page_count = 1
+        page_count_list.append(page_count)
+        pic_type_list.append(''.join(item.a['class'])) # 这里将class的值连在一起了。本来会被拆分，为了下面方便比较就这样写了
+    for item in pic_div_list:
+        pic_url = item.img.get('data-src').replace('c/150x150/', '')
+        pic_ref = 'https://www.pixiv.net/artworks/' + item.img.get('data-id')
+        pic_id_list.append(item.img.get('data-id'))
+        pic_url_list.append(pic_url)
+        pic_ref_list.append(pic_ref)
+    for item in pic_h1_list:
+        pic_title_list.append(item.text)
+    print(f'已获取第{page}链接，开始下载')
     return pic_url_list, pic_ref_list, pic_title_list, page_count_list, pic_type_list, pic_id_list
 
 def download_pic(pic_url, pic_ref, pic_title, page_count, pic_type, pic_id):
@@ -120,16 +120,23 @@ def download_pic(pic_url, pic_ref, pic_title, page_count, pic_type, pic_id):
             with open('pixiv_fav/' + pic_title + '.jpg', 'wb') as fp:
                 fp.write(r.content)
         else:
-            for i in range(page_count):
-                time.sleep(randint(5, 10)) # 暂停避免爬太快被封
-                target_title = pic_title + str(i)
-                while os.path.isfile('pixiv_fav/' + target_title + '.jpg'):
-                    target_title += '-1'
-                target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
-                print('当前图片url: ', target_url)
-                r = session.get(target_url, headers=headers, timeout=1)
-                with open('pixiv_fav/' + target_title + '.jpg', 'wb') as fp:
-                    fp.write(r.content)
+            try:
+                pic_title_list = []
+                for i in range(page_count):
+                    time.sleep(randint(5, 10)) # 暂停避免爬太快被封
+                    target_title = pic_title + str(i)
+                    while os.path.isfile('pixiv_fav/' + target_title + '.jpg'):
+                        target_title += '-1'
+                    target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
+                    print('当前图片url: ', target_url)
+                    r = session.get(target_url, headers=headers, timeout=1)
+                    with open('pixiv_fav/' + target_title + '.jpg', 'wb') as fp:
+                        fp.write(r.content)
+                    pic_title_list.append(target_title)
+            except:
+                for pic_title in pic_title_list:
+                    os.remove('pixiv_fav/' + pic_title + '.jpg')
+                raise ValueError('pic download error')
     else:
         time.sleep(randint(5, 10)) # 暂停避免爬太快被封
         get_gif(pic_id, pic_ref, pic_title)
@@ -175,13 +182,22 @@ def download():
     '''
     获取信息传递给下载函数下载图片
     '''
-    pic_url_list, pic_ref_list, pic_title_list, page_count_list, pic_type_list, pic_id_list = get_pic_information()
-    for i in range(len(pic_title_list)):
+    try:
+        page_num = get_page_num(rest)
+    except:
+        page_num = restart_if_falied(get_page_num, 20, (rest,))
+    for page in range(1, page_num + 1):
         try:
-            download_pic(pic_url_list[i], pic_ref_list[i], pic_title_list[i], page_count_list[i], pic_type_list[i], pic_id_list[i])
+            pic_url_list, pic_ref_list, pic_title_list, page_count_list, pic_type_list, pic_id_list = get_pic_information(page)
         except:
-            restart_if_falied(download_pic, 20, (pic_url_list[i], pic_ref_list[i], pic_title_list[i], page_count_list[i], pic_type_list[i], pic_id_list[i]))
-    print('任务完成')
+            pic_url_list, pic_ref_list, pic_title_list, page_count_list, pic_type_list, pic_id_list = restart_if_falied(get_pic_information, 20, (page,))
+        for i in range(len(pic_title_list)):
+            try:
+                download_pic(pic_url_list[i], pic_ref_list[i], pic_title_list[i], page_count_list[i], pic_type_list[i], pic_id_list[i])
+            except:
+                restart_if_falied(download_pic, 20, (pic_url_list[i], pic_ref_list[i], pic_title_list[i], page_count_list[i], pic_type_list[i], pic_id_list[i]))
+        print(f'第{page}页任务完成')
+    print('全部任务完成')
             
         
         
@@ -197,5 +213,7 @@ if __name__ == '__main__':
     cookies = read_cookie()
     session.cookies = cookies
     # get_pic_information()
+    choose_num = int(input('抓取公开收藏输入1，抓取私人收藏输入2: '))
+    rest = 'show' if choose_num == 1 else 'hide'
     download()
     
