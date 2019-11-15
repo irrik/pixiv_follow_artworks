@@ -4,9 +4,12 @@ import json
 import os
 import time
 import zipfile
+import shutil
 import imageio
 from random import randint
 from bs4 import BeautifulSoup
+
+START_POS_FLAG = True
 
 def restart_if_falied(func, max_tries, args=(), kwargs={}, secs=120, sleep=5):
     '''
@@ -40,7 +43,7 @@ def read_cookie():
             jar.set(cookie['name'], cookie['value'])
     return jar
 
-def get_page_num(rest):
+def get_page_num():
     '''
     请求收藏页面，返回收藏总页数
     '''
@@ -50,7 +53,7 @@ def get_page_num(rest):
 				 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
     }
     # 请求收藏页面，进行分析
-    res = session.get(f'https://www.pixiv.net/bookmark.php?rest={rest}', headers=headers, timeout=1)
+    res = session.get(f'https://www.pixiv.net/bookmark.php?rest={REST}', headers=headers, timeout=1)
     res_bs = BeautifulSoup(res.text, 'html.parser')
     if res_bs.find('ul', attrs={'class': 'page-list'}) != None:
         page_num = int(res_bs.find('ul', attrs={'class': 'page-list'}).find_all('li')[-1].a.text)
@@ -74,7 +77,7 @@ def get_pic_information(page):
     pic_type_list = []
     pic_id_list = []
 
-    url = f'https://www.pixiv.net/bookmark.php?rest={rest}&p={page}'
+    url = f'https://www.pixiv.net/bookmark.php?rest={REST}&p={page}'
     res = session.get(url, headers=headers, timeout=1)
     res_bs = BeautifulSoup(res.text, 'html.parser')
     pic_div_list = res_bs.find('div', attrs={'class': 'display_editable_works'}).find_all('div', attrs={'class': '_layout-thumbnail'})
@@ -95,7 +98,7 @@ def get_pic_information(page):
         pic_ref_list.append(pic_ref)
     for item in pic_h1_list:
         pic_title_list.append(item.text)
-    print(f'已获取第{page}链接，开始下载')
+    print(f'已获取第{page}页链接，开始下载')
     return pic_url_list, pic_ref_list, pic_title_list, page_count_list, pic_type_list, pic_id_list
 
 def download_pic(pic_url, pic_ref, pic_title, page_count, pic_type, pic_id):
@@ -107,17 +110,17 @@ def download_pic(pic_url, pic_ref, pic_title, page_count, pic_type, pic_id):
 			'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) '
 				 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
     }
-    os.makedirs('pixiv_fav', exist_ok=True) # 图片存放目录
+    os.makedirs(f'pixiv_{REST}_fav', exist_ok=True) # 图片存放目录
     table = str.maketrans('', '', r'\|/*?:"<>')
     pic_title = pic_title.translate(table) # 去除图片title中的非法字符
     if pic_type != 'work_workugoku-illust':
         if page_count == 1:
-            while os.path.isfile('pixiv_fav/' + pic_title + '.jpg'):
+            while os.path.isfile(f'pixiv_{REST}_fav/' + pic_title + '.jpg'):
                 pic_title += '-1'
             time.sleep(randint(5, 10)) # 暂停避免爬太快被封
             print('当前图片url: ', pic_url)
             r = session.get(pic_url, headers=headers, timeout=1)
-            with open('pixiv_fav/' + pic_title + '.jpg', 'wb') as fp:
+            with open(f'pixiv_{REST}_fav/' + pic_title + '.jpg', 'wb') as fp:
                 fp.write(r.content)
         else:
             try:
@@ -125,17 +128,17 @@ def download_pic(pic_url, pic_ref, pic_title, page_count, pic_type, pic_id):
                 for i in range(page_count):
                     time.sleep(randint(5, 10)) # 暂停避免爬太快被封
                     target_title = pic_title + str(i)
-                    while os.path.isfile('pixiv_fav/' + target_title + '.jpg'):
+                    while os.path.isfile(f'pixiv_{REST}_fav/' + target_title + '.jpg'):
                         target_title += '-1'
                     target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
                     print('当前图片url: ', target_url)
                     r = session.get(target_url, headers=headers, timeout=1)
-                    with open('pixiv_fav/' + target_title + '.jpg', 'wb') as fp:
+                    with open(f'pixiv_{REST}_fav/' + target_title + '.jpg', 'wb') as fp:
                         fp.write(r.content)
                     pic_title_list.append(target_title)
             except:
                 for pic_title in pic_title_list:
-                    os.remove('pixiv_fav/' + pic_title + '.jpg')
+                    os.remove(f'pixiv_{REST}_fav/' + pic_title + '.jpg')
                 raise ValueError('pic download error')
     else:
         time.sleep(randint(5, 10)) # 暂停避免爬太快被封
@@ -170,9 +173,9 @@ def get_gif(pic_id, pic_ref, pic_title):
     # 合成gif图片
     for file_name in file_name_list:
         frame_list.append(imageio.imread(file_name))
-    while os.path.isfile('pixiv_fav/' + pic_title + '.gif'):
+    while os.path.isfile(f'pixiv_{REST}_fav/' + pic_title + '.gif'):
         pic_title += '-1'
-    imageio.mimsave('pixiv_fav/' + pic_title + '.gif', frame_list, 'GIF', duration=delay / 1000)
+    imageio.mimsave(f'pixiv_{REST}_fav/' + pic_title + '.gif', frame_list, 'GIF', duration=delay / 1000)
 
     for file_name in file_name_list:
         os.remove(file_name)
@@ -183,23 +186,80 @@ def download():
     获取信息传递给下载函数下载图片
     '''
     try:
-        page_num = get_page_num(rest)
+        page_num = get_page_num()
     except:
-        page_num = restart_if_falied(get_page_num, 20, (rest,))
-    for page in range(1, page_num + 1):
+        page_num = restart_if_falied(get_page_num, 20)
+    for page in range(START_PAGE, page_num + 1):
+        setup_page(page)
+        start_pos = get_pos()
         try:
             pic_url_list, pic_ref_list, pic_title_list, page_count_list, pic_type_list, pic_id_list = get_pic_information(page)
         except:
             pic_url_list, pic_ref_list, pic_title_list, page_count_list, pic_type_list, pic_id_list = restart_if_falied(get_pic_information, 20, (page,))
-        for i in range(len(pic_title_list)):
+        for i in range(start_pos,len(pic_title_list)):
             try:
                 download_pic(pic_url_list[i], pic_ref_list[i], pic_title_list[i], page_count_list[i], pic_type_list[i], pic_id_list[i])
+                setup_pos(i)
             except:
                 restart_if_falied(download_pic, 20, (pic_url_list[i], pic_ref_list[i], pic_title_list[i], page_count_list[i], pic_type_list[i], pic_id_list[i]))
         print(f'第{page}页任务完成')
     print('全部任务完成')
-            
-        
+    clear_page()
+    clear_pos()
+
+def setup_page(page):
+    '''
+    记录当前下载的页数，以便任务中断再启动时继续任务
+    '''
+    with open(f'pixiv_{REST}_fav.txt', 'w') as fp:
+        fp.write(str(page))
+
+def check_page():
+    '''
+    程序启动时检查程序是否有中断，如果有，让用户选择任务开始方式
+    '''
+    if os.path.isfile(f'pixiv_{REST}_fav.txt'):
+        choose_num = int(input('发现未完成任务，继续任务输入1，重新开始输入2：'))
+        if choose_num == 1:
+            with open(f'pixiv_{REST}_fav.txt', 'r') as fp:
+                return int(fp.readline())
+    os.makedirs(f'pixiv_{REST}_fav', exist_ok=True)
+    shutil.rmtree(f'pixiv_{REST}_fav')
+    return 1
+
+def clear_page():
+    '''
+    任务完成后删除记录page的文件
+    '''
+    os.remove(f'pixiv_{REST}_fav.txt')
+
+def setup_pos(pos):
+    '''
+    记录当前下载的链接位置
+    '''
+    with open(f'pixiv_{REST}_pos.txt', 'w') as fp:
+        fp.write(str(pos + 1))
+
+def get_pos():
+    '''
+    获取下载链接的位置
+    '''
+    global START_POS_FLAG
+    if START_POS_FLAG:
+        START_POS_FLAG = False
+        if os.path.isfile(f'pixiv_{REST}_pos.txt'):
+            with open(f'pixiv_{REST}_pos.txt', 'r') as fp:
+                return int(fp.readline())
+        return 0
+    else:
+        return 0
+
+def clear_pos():
+    '''
+    完成任务后删除txt文件
+    '''
+    if os.path.isfile(f'pixiv_{REST}_pos.txt'):
+        os.remove(f'pixiv_{REST}_pos.txt')
         
 
 
@@ -214,6 +274,7 @@ if __name__ == '__main__':
     session.cookies = cookies
     # get_pic_information()
     choose_num = int(input('抓取公开收藏输入1，抓取私人收藏输入2: '))
-    rest = 'show' if choose_num == 1 else 'hide'
+    REST = 'show' if choose_num == 1 else 'hide'
+    START_PAGE = check_page()
     download()
     

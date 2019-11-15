@@ -9,6 +9,7 @@ import time
 from random import randint
 import imageio
 import zipfile
+import shutil
 
 TRAN_TABLE = str.maketrans('', '', r'/\*:?|<>"') # 替换非法字符的表
 
@@ -82,7 +83,7 @@ def get_artist_information(artist_rest):
 		artist_list = res_bs.find('section', id='search-result').find_all('div', attrs={'class': 'userdata'})
 		for item in artist_list:
 			artist_id_list.append(item.a['data-user_id'])
-			artist_name_list.append(item.a['data-user_name'])
+			artist_name_list.append(item.a['data-user_name'].translate(TRAN_TABLE))
 			ajax_url_list.append('https://www.pixiv.net/ajax/user/{}/profile/all'.format(item.a['data-user_id']))
 			
 
@@ -149,13 +150,20 @@ def download_picture():
 	'''
 	解析数据传给下载函数下载
 	'''
-	artist_name_list, artist_id_list, ajax_url_list = get_artist_information(artist_rest)
-	name_count = 0
-	artist_id_count = 0
+	try:
+		artist_name_list, artist_id_list, ajax_url_list = get_artist_information(artist_rest)
+	except:
+		artist_name_list, artist_id_list, ajax_url_list = restart_if_failed(get_artist_information, 20 ,(artist_rest,))
+	# name_count = 0
+	# artist_id_count = 0
+	name_count = artist_id_count = check_artist(artist_name_list)
 	
 	
-	for ajax_url in ajax_url_list: # 遍历每一个画师作品
-		artist_name = artist_name_list[name_count].translate(TRAN_TABLE) # 获取画师名字
+	
+	for i in range(name_count,len(ajax_url_list)): # 遍历每一个画师作品
+		ajax_url = ajax_url_list[i]
+		setup_artist(artist_name_list[name_count])
+		artist_name = artist_name_list[name_count] # 获取画师名字
 		artist_id = artist_id_list[artist_id_count] # 获取画师id
 		id_group_list = get_id_group_list(ajax_url, artist_id)
 		print('画师: ', artist_name, '作品', len(id_group_list), '页')
@@ -179,6 +187,7 @@ def download_picture():
 		name_count += 1
 		artist_id_count += 1
 		print(artist_name, '完成')
+	clear_artist()
 	print('已完成所有任务')
 
 def download_pic(title, pic_id, pic_url, artist_name, pic_num, pic_illustType):
@@ -261,8 +270,38 @@ def get_gif(artist_name, title, pic_id, referer_url):
 		os.remove(file_name)
 	os.remove('temp.zip')
 
+def setup_artist(artist_name):
+	'''
+	保存当前下载图片的artist_name
+	'''
+	with open(f'{artist_rest}_artist_name.txt', 'w') as fp:
+		fp.write(artist_name)
 
-	
+def check_artist(artist_name_list):
+	'''
+	检查任务未完成，给用户选择任务开始的方式
+	'''
+	if os.path.isfile(f'{artist_rest}_artist_name.txt'):
+		choose_num = int(input('发现未完成任务，继续任务输入1，重新开始输入2：'))
+		if choose_num == 1:
+			with open(f'{artist_rest}_artist_name.txt', 'r') as fp:
+				artist_name = fp.readline()
+				os.makedirs(artist_name, exist_ok=True)
+				shutil.rmtree(artist_name)
+				return artist_name_list.index(artist_name)
+	for artist_name in artist_name_list:
+		try:
+			shutil.rmtree(artist_name)
+		except:
+			pass
+	return 0
+
+def clear_artist():
+	'''
+	任务完成后删除保存artist_name的txt文件
+	'''
+	if os.path.isfile(f'{artist_rest}_artist_name.txt'):
+		os.remove(f'{artist_rest}_artist_name.txt')
 
 if __name__ == '__main__':
 	proxy = {
@@ -273,8 +312,6 @@ if __name__ == '__main__':
 	session.proxies = proxy
 	cookies = read_cookie()
 	session.cookies = cookies
-	# for i in ajax_list:
-		# print(i)
 	choose_num = int(input('输入1抓取公开的画师，输入2抓取隐藏画师：'))
 	artist_rest = 'show' if choose_num == 1 else 'hide'
 	download_picture()

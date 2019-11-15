@@ -8,8 +8,8 @@ from urllib.parse import quote
 from requests.cookies import RequestsCookieJar
 from random import randint
 import imageio
+import shutil
 
-COLLECTION = 5000 # 图片下载阈值
 TRAN_TABLE = str.maketrans('', '', r'/\*:?|<>"') # 替换非法字符的表
 
 def read_cookies():
@@ -105,7 +105,7 @@ def download_pic(pic_title, pic_id, pic_url, pic_pageCount, pic_illustType):
     '''
     下载图片
     '''
-    os.makedirs('high_collection', exist_ok=True) # 创建画师名字的文件夹
+    os.makedirs(f'{TAG}_high_collection', exist_ok=True) # 创建画师名字的文件夹
     referer_url = 'https://www.pixiv.net/artworks/' + str(pic_id)
     pic_title = pic_title.translate(TRAN_TABLE)
     if pic_illustType != 2:
@@ -120,9 +120,9 @@ def download_pic(pic_title, pic_id, pic_url, pic_pageCount, pic_illustType):
             print('当前图片url: ', pic_url)
             r = session.get(pic_url, headers=headers, timeout=1) # 获取图片
             # 递归检查图片是否已经存在
-            while os.path.isfile('high_collection/' + pic_title + '.jpg'):
+            while os.path.isfile(f'{TAG}_high_collection/' + pic_title + '.jpg'):
                 pic_title += '-1'
-            with open('high_collection/' + pic_title + '.jpg', 'wb') as fp:
+            with open(f'{TAG}_high_collection/' + pic_title + '.jpg', 'wb') as fp:
                 fp.write(r.content)
         else:
             try:
@@ -130,17 +130,17 @@ def download_pic(pic_title, pic_id, pic_url, pic_pageCount, pic_illustType):
                 for i in range(pic_pageCount):
                     time.sleep(randint(5, 10)) # 暂停避免爬太快被封
                     target_title = pic_title + str(i)
-                    while os.path.isfile('high_collection/' + target_title + '.jpg'):
+                    while os.path.isfile(f'{TAG}_high_collection/' + target_title + '.jpg'):
                         target_title += '-1'
                     target_url = pic_url.replace('p0', f'p{i}') # 替换目标url
                     print('当前图片url: ', target_url)
                     r = session.get(target_url, headers=headers, timeout=1)
-                    with open('high_collection/' + target_title + '.jpg', 'wb') as fp:
+                    with open(f'{TAG}_high_collection/' + target_title + '.jpg', 'wb') as fp:
                         fp.write(r.content)
                     pic_title_list.append(target_title)
             except:
                 for pic_title in pic_title_list:
-                    os.remove('high_collection/' + pic_title + '.jpg')
+                    os.remove(f'{TAG}_high_collection/' + pic_title + '.jpg')
                 raise ValueError('pic download error')
     else:
         time.sleep(randint(5, 10)) # 暂停避免爬太快被封
@@ -173,9 +173,9 @@ def get_gif(pic_title, pic_id, referer_url):
 	# 合成gif图片
 	for file_name in file_name_list:
 		frame_list.append(imageio.imread(file_name))
-	while os.path.isfile('high_collection/' + pic_title + '.gif'):
+	while os.path.isfile(f'{TAG}_high_collection/' + pic_title + '.gif'):
 		pic_title += '-1'
-	imageio.mimsave('high_collection/' + pic_title + '.gif', frame_list, 'GIF', duration=delay / 1000)
+	imageio.mimsave(f'{TAG}_high_collection/' + pic_title + '.gif', frame_list, 'GIF', duration=delay / 1000)
 
 	for file_name in file_name_list:
 		os.remove(file_name)
@@ -189,7 +189,8 @@ def download():
         page_num = get_page_num()
     except:
         page_num = restart_if_failed(get_page_num, 20)
-    for page in range(1, page_num + 1):
+    for page in range(START_PAGE, page_num + 1):
+        setup_page(page)
         try:
             pic_id_list, pic_illustType_list, pic_pageCount_list, pic_title_list, pic_url_list = get_pic_info(page)
         except:
@@ -206,9 +207,35 @@ def download():
                     download_pic(pic_title_list[i], pic_id_list[i], pic_url_list[i], pic_pageCount_list[i], pic_illustType_list[i])
                 except:
                     restart_if_failed(download_pic, 20, (pic_title_list[i], pic_id_list[i], pic_url_list[i], pic_pageCount_list[i], pic_illustType_list[i]))
+    print('任务完成')
+    clear_page()
 
     
+def check_page():
+    '''
+    检查当前tag是否在完成所有任务前中断过，如果有，返回上次中断前的page
+    '''
+    if os.path.isfile(f'{TAG}.txt'):
+        choose_num = int(input('发现历史未完成任务,继续上次任务输入1,重新开始输入2: '))
+        if choose_num == 1:
+            with open(f'{TAG}.txt', 'r') as fp:
+                return int(fp.readline())
+        os.makedirs(f'{TAG}_high_collection', exist_ok=True)
+        shutil.rmtree(f'{TAG}_high_collection')
+    return 1
 
+def setup_page(page):
+    '''
+    为当前搜索的tag设置历史page以便下次重启时继续任务
+    '''
+    with open(f'{TAG}.txt', 'w') as fp:
+        fp.write(str(page))
+
+def clear_page():
+    '''
+    下载完成之后清空记录page的文件
+    '''
+    os.remove(f'{TAG}.txt')
 
 
 if __name__ == '__main__':
@@ -221,4 +248,6 @@ if __name__ == '__main__':
     cookies = read_cookies()
     session.cookies = cookies
     TAG = quote(input('请输入要搜索的tag:'))
+    COLLECTION = int(input('请输入下载的阈值：')) 
+    START_PAGE = check_page()
     download()
